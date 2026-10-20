@@ -1,0 +1,145 @@
+package auth
+
+import (
+	"encoding/json"
+	"errors"
+	"net/http"
+
+	"github.com/Sidd231/4yaar/backend/internal/utils"
+	"github.com/google/uuid"
+)
+
+// Handler exposes HTTP handlers for authentication.
+type Handler struct {
+	service Service
+}
+
+// NewHandler initializes a new Auth HTTP handler.
+func NewHandler(service Service) *Handler {
+	return &Handler{service: service}
+}
+
+type registerRequest struct {
+	InviteToken string `json:"invite_token"`
+	Name        string `json:"name"`
+	Password    string `json:"password"`
+}
+
+type loginRequest struct {
+	Email    string `json:"email"`
+	Password string `json:"password"`
+}
+
+type tokenRequest struct {
+	RefreshToken string `json:"refresh_token"`
+}
+
+// Register handles user registration using a valid invite token.
+func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
+	var req registerRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		utils.JSONError(w, http.StatusBadRequest, "Invalid request payload")
+		return
+	}
+
+	if req.InviteToken == "" || req.Name == "" || len(req.Password) < 8 {
+		utils.JSONError(w, http.StatusBadRequest, "invite_token, name, and a password (min 8 chars) are required")
+		return
+	}
+
+	tokenUUID, err := uuid.Parse(req.InviteToken)
+	if err != nil {
+		utils.JSONError(w, http.StatusBadRequest, "Invalid invite token format")
+		return
+	}
+
+	resp, err := h.service.Register(r.Context(), tokenUUID, req.Name, req.Password)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrInvalidInvite):
+			utils.JSONError(w, http.StatusBadRequest, "Invalid or expired invitation token")
+		case errors.Is(err, ErrInviteAlreadyUsed):
+			utils.JSONError(w, http.StatusConflict, "Invitation token has already been redeemed")
+		case errors.Is(err, ErrUserAlreadyExists):
+			utils.JSONError(w, http.StatusConflict, "A user with this email address already exists")
+		default:
+			utils.JSONError(w, http.StatusInternalServerError, "Failed to register user")
+		}
+		return
+	}
+
+	utils.JSONResponse(w, http.StatusCreated, resp)
+}
+
+// Login authenticates a user and returns JWT token pair.
+func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
+	var req loginRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		utils.JSONError(w, http.StatusBadRequest, "Invalid request payload")
+		return
+	}
+
+	if req.Email == "" || req.Password == "" {
+		utils.JSONError(w, http.StatusBadRequest, "Email and password are required")
+		return
+	}
+
+	resp, err := h.service.Login(r.Context(), req.Email, req.Password)
+	if err != nil {
+		if errors.Is(err, ErrInvalidCredentials) {
+			utils.JSONError(w, http.StatusUnauthorized, "Invalid email or password")
+			return
+		}
+		utils.JSONError(w, http.StatusInternalServerError, "Authentication failed")
+		return
+	}
+
+	utils.JSONResponse(w, http.StatusOK, resp)
+}
+
+// Refresh rotates the refresh token and returns a new access token.
+func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
+	var req tokenRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		utils.JSONError(w, http.StatusBadRequest, "Invalid request payload")
+		return
+	}
+
+	if req.RefreshToken == "" {
+		utils.JSONError(w, http.StatusBadRequest, "refresh_token is required")
+		return
+	}
+
+	resp, err := h.service.Refresh(r.Context(), req.RefreshToken)
+	if err != nil {
+		if errors.Is(err, ErrTokenRevoked) || errors.Is(err, ErrInvalidToken) {
+			utils.JSONError(w, http.StatusUnauthorized, "Invalid or revoked refresh token")
+			return
+		}
+		utils.JSONError(w, http.StatusInternalServerError, "Failed to refresh token")
+		return
+	}
+
+	utils.JSONResponse(w, http.StatusOK, resp)
+}
+
+// Logout invalidates a refresh token in Redis.
+func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
+	var req tokenRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		utils.JSONError(w, http.StatusBadRequest, "Invalid request payload")
+		return
+	}
+
+	if req.RefreshToken == "" {
+		utils.JSONError(w, http.StatusBadRequest, "refresh_token is required")
+		return
+	}
+
+	if err := h.service.Logout(r.Context(), req.RefreshToken); err != nil {
+		utils.JSONError(w, http.StatusInternalServerError, "Failed to logout")
+		return
+	}
+
+	utils.JSONResponse(w, http.StatusOK, map[string]string{"message": "Logged out successfully"})
+}

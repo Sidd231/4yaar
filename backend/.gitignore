@@ -1,0 +1,38 @@
+# Binaries and compiled output
+bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Architecture-specific binaries
+*.cgo
+*.test
+*.out
+
+# Environment variables and secrets
+.env
+.env.local
+.env.*.local
+*.env
+!.env.example
+
+# Log files
+*.log
+
+# IDE and Editor configurations
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Dependency cache / vendor (if ever vendored)
+vendor/
+
+# Temporary directories
+tmp/
+scratch/
