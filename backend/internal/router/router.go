@@ -9,6 +9,7 @@ import (
 	"github.com/Sidd231/4yaar/backend/internal/modules/chat"
 	"github.com/Sidd231/4yaar/backend/internal/modules/files"
 	"github.com/Sidd231/4yaar/backend/internal/modules/invite"
+	"github.com/Sidd231/4yaar/backend/internal/modules/users"
 	"github.com/Sidd231/4yaar/backend/internal/modules/videocall"
 	"github.com/Sidd231/4yaar/backend/internal/utils"
 	"github.com/go-chi/chi/v5"
@@ -18,6 +19,7 @@ import (
 // Handlers encapsulates all HTTP module handlers.
 type Handlers struct {
 	Auth      *auth.Handler
+	Users     *users.Handler
 	Invite    *invite.Handler
 	Chat      *chat.Handler
 	Files     *files.Handler
@@ -46,7 +48,10 @@ func NewRouter(cfg *config.Config, handlers *Handlers) *chi.Mux {
 
 	// API v1 Endpoints
 	r.Route("/api/v1", func(api chi.Router) {
-		auth.RegisterRoutes(api, handlers.Auth)
+		auth.RegisterRoutes(api, handlers.Auth, cfg.JWTSecret)
+		if handlers.Users != nil {
+			users.RegisterRoutes(api, handlers.Users, cfg.JWTSecret)
+		}
 		invite.RegisterRoutes(api, handlers.Invite, cfg.JWTSecret)
 		chat.RegisterHTTPRoutes(api, handlers.Chat, cfg.JWTSecret)
 		files.RegisterRoutes(api, handlers.Files, cfg.JWTSecret)

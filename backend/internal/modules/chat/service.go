@@ -11,8 +11,10 @@ import (
 )
 
 var (
-	ErrRoomNotFound = errors.New("room not found")
-	ErrAccessDenied = errors.New("user does not have access to this room")
+	ErrRoomNotFound  = errors.New("room not found")
+	ErrAccessDenied  = errors.New("user does not have access to this room")
+	ErrAlreadyMember = errors.New("user is already a member of this room")
+	ErrNotAuthorized = errors.New("only room creator or admin can add members")
 )
 
 // Service defines chat room and messaging business logic.
@@ -22,6 +24,7 @@ type Service interface {
 	GetRoomMessages(ctx context.Context, roomID, userID uuid.UUID, cursor *time.Time, limit int) ([]models.Message, error)
 	SaveMessage(ctx context.Context, roomID, senderID uuid.UUID, content, msgType string, fileID *uuid.UUID) (*models.Message, error)
 	CanAccessRoom(ctx context.Context, roomID, userID uuid.UUID) (bool, error)
+	AddMember(ctx context.Context, roomID, targetUserID, requestingUserID uuid.UUID, requestingUserRole string) (*models.RoomMember, error)
 }
 
 type service struct {
@@ -99,3 +102,42 @@ func (s *service) SaveMessage(ctx context.Context, roomID, senderID uuid.UUID, c
 func (s *service) CanAccessRoom(ctx context.Context, roomID, userID uuid.UUID) (bool, error) {
 	return s.repo.IsUserInRoom(ctx, roomID, userID)
 }
+
+// AddMember adds a user to an existing chat room.
+// Only the room creator or an admin can add members.
+func (s *service) AddMember(ctx context.Context, roomID, targetUserID, requestingUserID uuid.UUID, requestingUserRole string) (*models.RoomMember, error) {
+	room, err := s.repo.GetRoomByID(ctx, roomID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to lookup room: %w", err)
+	}
+	if room == nil {
+		return nil, ErrRoomNotFound
+	}
+
+	// Only creator or admin can add members
+	if room.CreatedBy != requestingUserID && requestingUserRole != models.RoleAdmin {
+		return nil, ErrNotAuthorized
+	}
+
+	// Check if target user is already a member
+	isMember, err := s.repo.IsUserInRoom(ctx, roomID, targetUserID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check room membership: %w", err)
+	}
+	if isMember {
+		return nil, ErrAlreadyMember
+	}
+
+	member := &models.RoomMember{
+		RoomID:   roomID,
+		UserID:   targetUserID,
+		JoinedAt: time.Now(),
+	}
+
+	if err := s.repo.AddMember(ctx, member); err != nil {
+		return nil, fmt.Errorf("failed to add room member: %w", err)
+	}
+
+	return member, nil
+}
+

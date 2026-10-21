@@ -11,6 +11,7 @@ func RegisterHTTPRoutes(r chi.Router, h *Handler, jwtSecret string) {
 		r.Use(middleware.AuthMiddleware(jwtSecret))
 		r.Get("/rooms", h.ListRooms)
 		r.Post("/rooms", h.CreateRoom)
+		r.Post("/rooms/{roomID}/members", h.AddMember)
 		r.Get("/rooms/{roomID}/messages", h.GetMessages)
 	})
 }

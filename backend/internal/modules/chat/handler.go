@@ -83,6 +83,60 @@ func (h *Handler) ListRooms(w http.ResponseWriter, r *http.Request) {
 	utils.JSONResponse(w, http.StatusOK, rooms)
 }
 
+type addMemberRequest struct {
+	UserID string `json:"user_id"`
+}
+
+// AddMember adds a user to a chat room.
+func (h *Handler) AddMember(w http.ResponseWriter, r *http.Request) {
+	claims, ok := middleware.GetUserFromContext(r.Context())
+	if !ok {
+		utils.JSONError(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+
+	roomIDStr := chi.URLParam(r, "roomID")
+	roomID, err := uuid.Parse(roomIDStr)
+	if err != nil {
+		utils.JSONError(w, http.StatusBadRequest, "Invalid roomID UUID")
+		return
+	}
+
+	var req addMemberRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		utils.JSONError(w, http.StatusBadRequest, "Invalid request payload")
+		return
+	}
+
+	targetUserID, err := uuid.Parse(req.UserID)
+	if err != nil {
+		utils.JSONError(w, http.StatusBadRequest, "Invalid user_id UUID")
+		return
+	}
+
+	member, err := h.service.AddMember(r.Context(), roomID, targetUserID, claims.UserID, claims.Role)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrRoomNotFound):
+			utils.JSONError(w, http.StatusNotFound, "Room not found")
+		case errors.Is(err, ErrNotAuthorized):
+			utils.JSONError(w, http.StatusForbidden, "Only the room creator or an admin can add members")
+		case errors.Is(err, ErrAlreadyMember):
+			utils.JSONError(w, http.StatusConflict, "User is already a member of this room")
+		default:
+			slog.Error("Failed to add member to room", "error", err, "room_id", roomID, "user_id", targetUserID)
+			utils.JSONError(w, http.StatusInternalServerError, "Failed to add member to room")
+		}
+		return
+	}
+
+	utils.JSONResponse(w, http.StatusCreated, map[string]any{
+		"room_id":   member.RoomID,
+		"user_id":   member.UserID,
+		"joined_at": member.JoinedAt,
+	})
+}
+
 // GetMessages retrieves cursor-based paginated message history.
 func (h *Handler) GetMessages(w http.ResponseWriter, r *http.Request) {
 	claims, ok := middleware.GetUserFromContext(r.Context())

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/Sidd231/4yaar/backend/internal/middleware"
 	"github.com/Sidd231/4yaar/backend/internal/utils"
@@ -32,10 +33,11 @@ func NewHandler(service Service, hub *Hub, jwtSecret string, allowedOrigins []st
 }
 
 type createRoomRequest struct {
-	Name string `json:"name"`
+	Name   string  `json:"name"`
+	RoomID *string `json:"room_id,omitempty"`
 }
 
-// CreateRoom handles creating a new video conference room.
+// CreateRoom handles creating a new video conference room or reusing an existing room if room_id is provided.
 func (h *Handler) CreateRoom(w http.ResponseWriter, r *http.Request) {
 	claims, ok := middleware.GetUserFromContext(r.Context())
 	if !ok {
@@ -46,6 +48,35 @@ func (h *Handler) CreateRoom(w http.ResponseWriter, r *http.Request) {
 	var req createRoomRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		utils.JSONError(w, http.StatusBadRequest, "Invalid request payload")
+		return
+	}
+
+	// If room_id is provided, validate existence and membership, and return existing room info
+	if req.RoomID != nil && strings.TrimSpace(*req.RoomID) != "" {
+		existingID, err := uuid.Parse(strings.TrimSpace(*req.RoomID))
+		if err != nil {
+			utils.JSONError(w, http.StatusBadRequest, "Invalid room_id UUID")
+			return
+		}
+
+		info, err := h.service.GetRoomInfo(r.Context(), existingID, claims.UserID)
+		if err != nil {
+			switch {
+			case errors.Is(err, ErrVideoRoomNotFound):
+				utils.JSONError(w, http.StatusNotFound, "Room not found")
+			case errors.Is(err, ErrVideoRoomUnauthorized):
+				utils.JSONError(w, http.StatusForbidden, "You are not a member of this room")
+			default:
+				utils.JSONError(w, http.StatusInternalServerError, "Failed to get video room details")
+			}
+			return
+		}
+
+		utils.JSONResponse(w, http.StatusOK, map[string]any{
+			"room_id":    info.ID,
+			"name":       info.Name,
+			"created_at": info.CreatedAt,
+		})
 		return
 	}
 

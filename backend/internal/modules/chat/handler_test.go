@@ -2,6 +2,7 @@ package chat
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -18,6 +19,7 @@ import (
 
 type mockChatService struct {
 	canAccessRoomFunc func(ctx context.Context, roomID, userID uuid.UUID) (bool, error)
+	addMemberFunc     func(ctx context.Context, roomID, targetUserID, requestingUserID uuid.UUID, requestingUserRole string) (*models.RoomMember, error)
 }
 
 func (m *mockChatService) CreateRoom(ctx context.Context, name, roomType string, creatorID uuid.UUID) (*models.Room, error) {
@@ -41,6 +43,13 @@ func (m *mockChatService) CanAccessRoom(ctx context.Context, roomID, userID uuid
 		return m.canAccessRoomFunc(ctx, roomID, userID)
 	}
 	return false, nil
+}
+
+func (m *mockChatService) AddMember(ctx context.Context, roomID, targetUserID, requestingUserID uuid.UUID, requestingUserRole string) (*models.RoomMember, error) {
+	if m.addMemberFunc != nil {
+		return m.addMemberFunc(ctx, roomID, targetUserID, requestingUserID, requestingUserRole)
+	}
+	return nil, nil
 }
 
 const testChatJWTSecret = "test-chat-super-secret-key-at-least-32-bytes!!"
@@ -150,3 +159,112 @@ func TestChatHandler_ServeWS(t *testing.T) {
 		}
 	})
 }
+
+func TestChatHandler_AddMember(t *testing.T) {
+	roomID := uuid.New()
+	creatorID := uuid.New()
+	targetUserID := uuid.New()
+	nonCreatorID := uuid.New()
+
+	mockSvc := &mockChatService{
+		addMemberFunc: func(ctx context.Context, rID, tID, reqID uuid.UUID, role string) (*models.RoomMember, error) {
+			if rID != roomID {
+				return nil, ErrRoomNotFound
+			}
+			if reqID != creatorID && role != models.RoleAdmin {
+				return nil, ErrNotAuthorized
+			}
+			if tID == creatorID {
+				return nil, ErrAlreadyMember
+			}
+			return &models.RoomMember{
+				RoomID:   rID,
+				UserID:   tID,
+				JoinedAt: time.Now(),
+			}, nil
+		},
+	}
+
+	handler := NewHandler(mockSvc, nil, testChatJWTSecret, []string{"http://localhost:3000"})
+
+	r := chi.NewRouter()
+	r.Post("/chat/rooms/{roomID}/members", handler.AddMember)
+
+	t.Run("room creator adds user successfully", func(t *testing.T) {
+		body := `{"user_id":"` + targetUserID.String() + `"}`
+		req := httptest.NewRequest(http.MethodPost, "/chat/rooms/"+roomID.String()+"/members", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		claims := &middleware.UserClaims{UserID: creatorID, Role: models.RoleMember, TokenType: middleware.TokenTypeAccess}
+		ctx := context.WithValue(req.Context(), middleware.UserContextKey, claims)
+		rec := httptest.NewRecorder()
+
+		r.ServeHTTP(rec, req.WithContext(ctx))
+
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("expected 201 Created, got %d: %s", rec.Code, rec.Body.String())
+		}
+		var resp struct {
+			Data struct {
+				RoomID   uuid.UUID `json:"room_id"`
+				UserID   uuid.UUID `json:"user_id"`
+				JoinedAt time.Time `json:"joined_at"`
+			} `json:"data"`
+			Error *string `json:"error"`
+		}
+		if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+			t.Fatalf("failed to decode response: %v", err)
+		}
+		if resp.Error != nil {
+			t.Fatalf("expected nil error, got: %s", *resp.Error)
+		}
+		if resp.Data.RoomID != roomID || resp.Data.UserID != targetUserID {
+			t.Fatalf("unexpected member data: %+v", resp.Data)
+		}
+	})
+
+	t.Run("non-creator member rejected with 403 Forbidden", func(t *testing.T) {
+		body := `{"user_id":"` + targetUserID.String() + `"}`
+		req := httptest.NewRequest(http.MethodPost, "/chat/rooms/"+roomID.String()+"/members", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		claims := &middleware.UserClaims{UserID: nonCreatorID, Role: models.RoleMember, TokenType: middleware.TokenTypeAccess}
+		ctx := context.WithValue(req.Context(), middleware.UserContextKey, claims)
+		rec := httptest.NewRecorder()
+
+		r.ServeHTTP(rec, req.WithContext(ctx))
+
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("expected 403 Forbidden, got %d: %s", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("adding existing member rejected with 409 Conflict", func(t *testing.T) {
+		body := `{"user_id":"` + creatorID.String() + `"}`
+		req := httptest.NewRequest(http.MethodPost, "/chat/rooms/"+roomID.String()+"/members", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		claims := &middleware.UserClaims{UserID: creatorID, Role: models.RoleMember, TokenType: middleware.TokenTypeAccess}
+		ctx := context.WithValue(req.Context(), middleware.UserContextKey, claims)
+		rec := httptest.NewRecorder()
+
+		r.ServeHTTP(rec, req.WithContext(ctx))
+
+		if rec.Code != http.StatusConflict {
+			t.Fatalf("expected 409 Conflict, got %d: %s", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("invalid user_id returns 400 Bad Request", func(t *testing.T) {
+		body := `{"user_id":"not-a-valid-uuid"}`
+		req := httptest.NewRequest(http.MethodPost, "/chat/rooms/"+roomID.String()+"/members", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		claims := &middleware.UserClaims{UserID: creatorID, Role: models.RoleMember, TokenType: middleware.TokenTypeAccess}
+		ctx := context.WithValue(req.Context(), middleware.UserContextKey, claims)
+		rec := httptest.NewRecorder()
+
+		r.ServeHTTP(rec, req.WithContext(ctx))
+
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("expected 400 Bad Request, got %d", rec.Code)
+		}
+	})
+}
+

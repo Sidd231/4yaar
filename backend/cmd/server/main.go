@@ -20,6 +20,7 @@ import (
 	"github.com/Sidd231/4yaar/backend/internal/modules/email"
 	"github.com/Sidd231/4yaar/backend/internal/modules/files"
 	"github.com/Sidd231/4yaar/backend/internal/modules/invite"
+	"github.com/Sidd231/4yaar/backend/internal/modules/users"
 	"github.com/Sidd231/4yaar/backend/internal/modules/videocall"
 	"github.com/Sidd231/4yaar/backend/internal/router"
 	"github.com/google/uuid"
@@ -113,6 +114,7 @@ func main() {
 	// 10. Initialize Handlers
 	handlers := &router.Handlers{
 		Auth:      auth.NewHandler(authService),
+		Users:     users.NewHandler(db),
 		Invite:    invite.NewHandler(inviteService),
 		Chat:      chat.NewHandler(chatService, chatHub, cfg.JWTSecret, cfg.AllowedOrigins),
 		Files:     files.NewHandler(filesService),

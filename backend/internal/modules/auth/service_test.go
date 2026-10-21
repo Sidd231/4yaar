@@ -34,7 +34,7 @@ func (m *mockAuthRepository) CreateUserWithInvite(ctx context.Context, user *mod
 func (m *mockAuthRepository) GetUserByID(ctx context.Context, id uuid.UUID) (*models.User, error) {
 	u, ok := m.users[id]
 	if !ok {
-		return nil, errors.New("user not found")
+		return nil, nil
 	}
 	return u, nil
 }
@@ -228,3 +228,38 @@ func TestAuthService_Logout_RejectsAccessToken(t *testing.T) {
 		t.Fatalf("expected ErrInvalidToken, got: %v", err)
 	}
 }
+
+func TestAuthService_GetMe(t *testing.T) {
+	repo := newMockAuthRepo()
+	cfg := testConfig()
+	svc := NewService(repo, nil, cfg)
+
+	userID := uuid.New()
+	user := &models.User{
+		ID:        userID,
+		Name:      "Test User",
+		Email:     "test@example.com",
+		Role:      models.RoleMember,
+		CreatedAt: time.Now(),
+	}
+	repo.users[userID] = user
+
+	t.Run("returns user profile when user exists", func(t *testing.T) {
+		dto, err := svc.GetMe(context.Background(), userID)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if dto.ID != userID || dto.Email != "test@example.com" || dto.Name != "Test User" || dto.Role != models.RoleMember {
+			t.Fatalf("unexpected user DTO returned: %+v", dto)
+		}
+	})
+
+	t.Run("returns ErrUserNotFound when user does not exist", func(t *testing.T) {
+		unknownID := uuid.New()
+		_, err := svc.GetMe(context.Background(), unknownID)
+		if !errors.Is(err, ErrUserNotFound) {
+			t.Fatalf("expected ErrUserNotFound, got: %v", err)
+		}
+	})
+}
+

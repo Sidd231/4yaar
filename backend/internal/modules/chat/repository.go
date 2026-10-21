@@ -18,6 +18,7 @@ type Repository interface {
 	IsUserInRoom(ctx context.Context, roomID, userID uuid.UUID) (bool, error)
 	SaveMessage(ctx context.Context, msg *models.Message) error
 	GetRoomMessages(ctx context.Context, roomID uuid.UUID, cursor *time.Time, limit int) ([]models.Message, error)
+	AddMember(ctx context.Context, member *models.RoomMember) error
 }
 
 type repository struct {
@@ -106,4 +107,9 @@ func (r *repository) GetRoomMessages(ctx context.Context, roomID uuid.UUID, curs
 	}
 
 	return messages, nil
+}
+
+// AddMember inserts a new room member into the room_members table.
+func (r *repository) AddMember(ctx context.Context, member *models.RoomMember) error {
+	return r.db.WithContext(ctx).Create(member).Error
 }

@@ -249,3 +249,118 @@ func TestVideoCallHandler_ServeWS(t *testing.T) {
 		}
 	})
 }
+
+func TestVideoCallHandler_CreateRoom(t *testing.T) {
+	existingRoomID := uuid.New()
+	creatorID := uuid.New()
+	nonMemberID := uuid.New()
+
+	createRoomCalled := false
+
+	mockSvc := &mockVideoService{
+		createRoomFunc: func(ctx context.Context, name string, cID uuid.UUID) (*models.Room, error) {
+			createRoomCalled = true
+			return &models.Room{
+				ID:        uuid.New(),
+				Name:      name,
+				CreatedBy: cID,
+				CreatedAt: time.Now(),
+			}, nil
+		},
+		getRoomInfoFunc: func(ctx context.Context, rID, uID uuid.UUID) (*VideoRoomInfo, error) {
+			if rID != existingRoomID {
+				return nil, ErrVideoRoomNotFound
+			}
+			if uID != creatorID {
+				return nil, ErrVideoRoomUnauthorized
+			}
+			return &VideoRoomInfo{
+				ID:              existingRoomID,
+				Name:            "Existing Chat Video Room",
+				CreatedBy:       creatorID,
+				ActivePeerCount: 0,
+				CreatedAt:       time.Now(),
+			}, nil
+		},
+	}
+
+	handler := NewHandler(mockSvc, nil, testJWTSecret, []string{"http://localhost:3000"})
+
+	r := chi.NewRouter()
+	r.Post("/video/rooms", handler.CreateRoom)
+
+	t.Run("with existing room_id returns existing room without duplicate", func(t *testing.T) {
+		createRoomCalled = false
+		body := `{"name":"ignored","room_id":"` + existingRoomID.String() + `"}`
+		req := httptest.NewRequest(http.MethodPost, "/video/rooms", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		claims := &middleware.UserClaims{UserID: creatorID, TokenType: middleware.TokenTypeAccess}
+		ctx := context.WithValue(req.Context(), middleware.UserContextKey, claims)
+		rec := httptest.NewRecorder()
+
+		r.ServeHTTP(rec, req.WithContext(ctx))
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected 200 OK, got %d: %s", rec.Code, rec.Body.String())
+		}
+		if createRoomCalled {
+			t.Fatal("expected CreateRoom not to be called when room_id is provided")
+		}
+
+		var resp struct {
+			Data struct {
+				RoomID uuid.UUID `json:"room_id"`
+				Name   string    `json:"name"`
+			} `json:"data"`
+			Error *string `json:"error"`
+		}
+		if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+			t.Fatalf("failed to decode response: %v", err)
+		}
+		if resp.Error != nil {
+			t.Fatalf("expected nil error, got: %s", *resp.Error)
+		}
+		if resp.Data.RoomID != existingRoomID || resp.Data.Name != "Existing Chat Video Room" {
+			t.Fatalf("unexpected room data: %+v", resp.Data)
+		}
+	})
+
+	t.Run("with existing room_id for non-member returns 403 Forbidden", func(t *testing.T) {
+		createRoomCalled = false
+		body := `{"name":"test","room_id":"` + existingRoomID.String() + `"}`
+		req := httptest.NewRequest(http.MethodPost, "/video/rooms", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		claims := &middleware.UserClaims{UserID: nonMemberID, TokenType: middleware.TokenTypeAccess}
+		ctx := context.WithValue(req.Context(), middleware.UserContextKey, claims)
+		rec := httptest.NewRecorder()
+
+		r.ServeHTTP(rec, req.WithContext(ctx))
+
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("expected 403 Forbidden, got %d: %s", rec.Code, rec.Body.String())
+		}
+		if createRoomCalled {
+			t.Fatal("expected CreateRoom not to be called for unauthorized room_id")
+		}
+	})
+
+	t.Run("without room_id creates new room with 201 Created", func(t *testing.T) {
+		createRoomCalled = false
+		body := `{"name":"Brand New Room"}`
+		req := httptest.NewRequest(http.MethodPost, "/video/rooms", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		claims := &middleware.UserClaims{UserID: creatorID, TokenType: middleware.TokenTypeAccess}
+		ctx := context.WithValue(req.Context(), middleware.UserContextKey, claims)
+		rec := httptest.NewRecorder()
+
+		r.ServeHTTP(rec, req.WithContext(ctx))
+
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("expected 201 Created, got %d: %s", rec.Code, rec.Body.String())
+		}
+		if !createRoomCalled {
+			t.Fatal("expected CreateRoom to be called when room_id is omitted")
+		}
+	})
+}
+

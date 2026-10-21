@@ -3,8 +3,10 @@ package auth
 import (
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 
+	"github.com/Sidd231/4yaar/backend/internal/middleware"
 	"github.com/Sidd231/4yaar/backend/internal/utils"
 	"github.com/google/uuid"
 )
@@ -146,4 +148,26 @@ func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 	}
 
 	utils.JSONResponse(w, http.StatusOK, map[string]string{"message": "Logged out successfully"})
+}
+
+// GetMe returns the authenticated user's profile.
+func (h *Handler) GetMe(w http.ResponseWriter, r *http.Request) {
+	claims, ok := middleware.GetUserFromContext(r.Context())
+	if !ok {
+		utils.JSONError(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+
+	user, err := h.service.GetMe(r.Context(), claims.UserID)
+	if err != nil {
+		if errors.Is(err, ErrUserNotFound) {
+			utils.JSONError(w, http.StatusNotFound, "User not found")
+			return
+		}
+		slog.Error("Failed to fetch current user profile", "error", err, "user_id", claims.UserID)
+		utils.JSONError(w, http.StatusInternalServerError, "Failed to retrieve user profile")
+		return
+	}
+
+	utils.JSONResponse(w, http.StatusOK, user)
 }

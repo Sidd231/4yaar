@@ -23,6 +23,7 @@ var (
 	ErrInvalidCredentials  = errors.New("invalid email or password")
 	ErrInvalidToken        = errors.New("invalid or expired refresh token")
 	ErrTokenRevoked        = errors.New("token has been revoked")
+	ErrUserNotFound        = errors.New("user not found")
 )
 
 // AuthResponse defines the payload returned on successful authentication.
@@ -48,6 +49,7 @@ type Service interface {
 	Login(ctx context.Context, email, password string) (*AuthResponse, error)
 	Refresh(ctx context.Context, refreshToken string) (*AuthResponse, error)
 	Logout(ctx context.Context, refreshToken string) error
+	GetMe(ctx context.Context, userID uuid.UUID) (*UserDTO, error)
 }
 
 type service struct {
@@ -200,6 +202,25 @@ func (s *service) Logout(ctx context.Context, refreshTokenString string) error {
 	}
 
 	return nil
+}
+
+// GetMe retrieves the user profile for the specified user ID.
+func (s *service) GetMe(ctx context.Context, userID uuid.UUID) (*UserDTO, error) {
+	user, err := s.repo.GetUserByID(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to lookup user: %w", err)
+	}
+	if user == nil {
+		return nil, ErrUserNotFound
+	}
+
+	return &UserDTO{
+		ID:        user.ID,
+		Name:      user.Name,
+		Email:     user.Email,
+		Role:      user.Role,
+		CreatedAt: user.CreatedAt,
+	}, nil
 }
 
 // generateAuthResponse creates JWT access and refresh tokens for a user.
