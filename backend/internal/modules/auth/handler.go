@@ -137,6 +137,10 @@ func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.service.Logout(r.Context(), req.RefreshToken); err != nil {
+		if errors.Is(err, ErrInvalidToken) {
+			utils.JSONError(w, http.StatusUnauthorized, "Invalid or expired refresh token")
+			return
+		}
 		utils.JSONError(w, http.StatusInternalServerError, "Failed to logout")
 		return
 	}

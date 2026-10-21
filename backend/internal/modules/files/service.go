@@ -50,7 +50,7 @@ type UploadResponse struct {
 // Service defines S3 file operations and metadata management.
 type Service interface {
 	UploadFile(ctx context.Context, uploaderID, roomID uuid.UUID, fileName, mimeType string, fileSize int64, reader io.Reader) (*UploadResponse, error)
-	GetPresignedURL(ctx context.Context, fileID uuid.UUID) (string, error)
+	GetPresignedURL(ctx context.Context, fileID, requesterID uuid.UUID) (string, error)
 	DeleteFile(ctx context.Context, fileID, requesterID uuid.UUID, requesterRole string) error
 }
 
@@ -90,6 +90,15 @@ func NewService(repo Repository, cfg *config.Config) (Service, error) {
 
 // UploadFile validates the file, streams it to AWS S3, saves metadata in PostgreSQL, and creates a presigned GET URL.
 func (s *service) UploadFile(ctx context.Context, uploaderID, roomID uuid.UUID, fileName, mimeType string, fileSize int64, reader io.Reader) (*UploadResponse, error) {
+	// Enforce room membership before processing file
+	isMember, err := s.repo.IsUserInRoom(ctx, roomID, uploaderID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to verify room membership: %w", err)
+	}
+	if !isMember {
+		return nil, ErrUnauthorized
+	}
+
 	if fileSize > MaxFileSize {
 		return nil, ErrFileTooLarge
 	}
@@ -152,14 +161,23 @@ func (s *service) UploadFile(ctx context.Context, uploaderID, roomID uuid.UUID, 
 	}, nil
 }
 
-// GetPresignedURL fetches an active file by ID and returns a fresh 15-minute presigned GET URL.
-func (s *service) GetPresignedURL(ctx context.Context, fileID uuid.UUID) (string, error) {
+// GetPresignedURL fetches an active file by ID, verifies room membership of the requester, and returns a fresh 15-minute presigned GET URL.
+func (s *service) GetPresignedURL(ctx context.Context, fileID, requesterID uuid.UUID) (string, error) {
 	file, err := s.repo.GetFileByID(ctx, fileID)
 	if err != nil {
 		return "", fmt.Errorf("database query failed: %w", err)
 	}
 	if file == nil {
 		return "", ErrFileNotFound
+	}
+
+	// Any room member can access files in that room
+	isMember, err := s.repo.IsUserInRoom(ctx, file.RoomID, requesterID)
+	if err != nil {
+		return "", fmt.Errorf("failed to verify room membership: %w", err)
+	}
+	if !isMember {
+		return "", ErrUnauthorized
 	}
 
 	return s.generatePresignedURL(ctx, file.S3Key, 15*time.Minute)

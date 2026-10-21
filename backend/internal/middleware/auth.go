@@ -16,13 +16,17 @@ type contextKey string
 
 const (
 	UserContextKey contextKey = "user_claims"
+
+	TokenTypeAccess  = "access"
+	TokenTypeRefresh = "refresh"
 )
 
 // UserClaims defines the JWT claims payload for authenticated users.
 type UserClaims struct {
-	UserID uuid.UUID `json:"user_id"`
-	Email  string    `json:"email"`
-	Role   string    `json:"role"`
+	UserID    uuid.UUID `json:"user_id"`
+	Email     string    `json:"email"`
+	Role      string    `json:"role"`
+	TokenType string    `json:"token_type"`
 	jwt.RegisteredClaims
 }
 
@@ -46,6 +50,12 @@ func AuthMiddleware(jwtSecret string) func(http.Handler) http.Handler {
 			claims, err := ParseAndValidateToken(tokenString, jwtSecret)
 			if err != nil {
 				utils.JSONError(w, http.StatusUnauthorized, fmt.Sprintf("Invalid or expired token: %s", err.Error()))
+				return
+			}
+
+			// Protected API endpoints must only accept access tokens
+			if claims.TokenType != TokenTypeAccess {
+				utils.JSONError(w, http.StatusUnauthorized, "Invalid token type: access token required")
 				return
 			}
 

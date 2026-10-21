@@ -15,27 +15,21 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-var upgrader = websocket.Upgrader{
-	ReadBufferSize:  1024,
-	WriteBufferSize: 1024,
-	CheckOrigin: func(r *http.Request) bool {
-		return true // Allow cross-origin WebSocket connections
-	},
-}
-
 // Handler manages chat HTTP endpoints and WebSocket connections.
 type Handler struct {
 	service   Service
 	hub       *Hub
 	jwtSecret string
+	upgrader  websocket.Upgrader
 }
 
-// NewHandler creates a new chat handler.
-func NewHandler(service Service, hub *Hub, jwtSecret string) *Handler {
+// NewHandler creates a new chat handler with configurable origin allowlist.
+func NewHandler(service Service, hub *Hub, jwtSecret string, allowedOrigins []string) *Handler {
 	return &Handler{
 		service:   service,
 		hub:       hub,
 		jwtSecret: jwtSecret,
+		upgrader:  utils.NewWebSocketUpgrader(allowedOrigins),
 	}
 }
 
@@ -149,15 +143,21 @@ func (h *Handler) ServeWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tokenStr := r.URL.Query().Get("token")
+	tokenStr := utils.ExtractWebSocketToken(r)
 	if tokenStr == "" {
-		http.Error(w, "Unauthorized: missing token query param", http.StatusUnauthorized)
+		http.Error(w, "Unauthorized: missing token", http.StatusUnauthorized)
 		return
 	}
 
 	claims, err := middleware.ParseAndValidateToken(tokenStr, h.jwtSecret)
 	if err != nil {
 		http.Error(w, "Unauthorized: invalid or expired token", http.StatusUnauthorized)
+		return
+	}
+
+	// Verify that only access tokens can authenticate WebSocket connections
+	if claims.TokenType != middleware.TokenTypeAccess {
+		http.Error(w, "Unauthorized: access token required", http.StatusUnauthorized)
 		return
 	}
 
@@ -168,7 +168,7 @@ func (h *Handler) ServeWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	conn, err := upgrader.Upgrade(w, r, nil)
+	conn, err := h.upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		slog.Error("Failed to upgrade chat websocket", "error", err)
 		return

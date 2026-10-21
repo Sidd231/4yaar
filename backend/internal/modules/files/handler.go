@@ -71,6 +71,8 @@ func (h *Handler) Upload(w http.ResponseWriter, r *http.Request) {
 	)
 	if err != nil {
 		switch {
+		case errors.Is(err, ErrUnauthorized):
+			utils.JSONError(w, http.StatusForbidden, "You are not a member of this room")
 		case errors.Is(err, ErrFileTooLarge):
 			utils.JSONError(w, http.StatusBadRequest, "File exceeds maximum size of 50MB")
 		case errors.Is(err, ErrUnsupportedType):
@@ -86,6 +88,12 @@ func (h *Handler) Upload(w http.ResponseWriter, r *http.Request) {
 
 // GetURL generates a fresh 15-minute presigned GET URL for a file.
 func (h *Handler) GetURL(w http.ResponseWriter, r *http.Request) {
+	claims, ok := middleware.GetUserFromContext(r.Context())
+	if !ok {
+		utils.JSONError(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+
 	fileIDStr := chi.URLParam(r, "fileID")
 	fileID, err := uuid.Parse(fileIDStr)
 	if err != nil {
@@ -93,13 +101,16 @@ func (h *Handler) GetURL(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	url, err := h.service.GetPresignedURL(r.Context(), fileID)
+	url, err := h.service.GetPresignedURL(r.Context(), fileID, claims.UserID)
 	if err != nil {
-		if errors.Is(err, ErrFileNotFound) {
+		switch {
+		case errors.Is(err, ErrFileNotFound):
 			utils.JSONError(w, http.StatusNotFound, "File not found")
-			return
+		case errors.Is(err, ErrUnauthorized):
+			utils.JSONError(w, http.StatusForbidden, "You do not have permission to access this file")
+		default:
+			utils.JSONError(w, http.StatusInternalServerError, "Failed to generate presigned download URL")
 		}
-		utils.JSONError(w, http.StatusInternalServerError, "Failed to generate presigned download URL")
 		return
 	}
 

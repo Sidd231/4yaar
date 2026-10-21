@@ -13,27 +13,21 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-var upgrader = websocket.Upgrader{
-	ReadBufferSize:  1024,
-	WriteBufferSize: 1024,
-	CheckOrigin: func(r *http.Request) bool {
-		return true // Allow cross-origin WebRTC signaling
-	},
-}
-
 // Handler handles video call HTTP and WebSocket endpoints.
 type Handler struct {
 	service   Service
 	hub       *Hub
 	jwtSecret string
+	upgrader  websocket.Upgrader
 }
 
-// NewHandler initializes a new video call handler.
-func NewHandler(service Service, hub *Hub, jwtSecret string) *Handler {
+// NewHandler initializes a new video call handler with configurable origin allowlist.
+func NewHandler(service Service, hub *Hub, jwtSecret string, allowedOrigins []string) *Handler {
 	return &Handler{
 		service:   service,
 		hub:       hub,
 		jwtSecret: jwtSecret,
+		upgrader:  utils.NewWebSocketUpgrader(allowedOrigins),
 	}
 }
 
@@ -74,7 +68,14 @@ func (h *Handler) CreateRoom(w http.ResponseWriter, r *http.Request) {
 }
 
 // GetRoomInfo returns the metadata and real-time active peer count for a video room.
+// Enforces that the requesting user is an active member of the room.
 func (h *Handler) GetRoomInfo(w http.ResponseWriter, r *http.Request) {
+	claims, ok := middleware.GetUserFromContext(r.Context())
+	if !ok {
+		utils.JSONError(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+
 	roomIDStr := chi.URLParam(r, "roomID")
 	roomID, err := uuid.Parse(roomIDStr)
 	if err != nil {
@@ -82,13 +83,16 @@ func (h *Handler) GetRoomInfo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	info, err := h.service.GetRoomInfo(r.Context(), roomID)
+	info, err := h.service.GetRoomInfo(r.Context(), roomID, claims.UserID)
 	if err != nil {
-		if errors.Is(err, ErrVideoRoomNotFound) {
+		switch {
+		case errors.Is(err, ErrVideoRoomNotFound):
 			utils.JSONError(w, http.StatusNotFound, "Video room not found")
-			return
+		case errors.Is(err, ErrVideoRoomUnauthorized):
+			utils.JSONError(w, http.StatusForbidden, "You are not a member of this video room")
+		default:
+			utils.JSONError(w, http.StatusInternalServerError, "Failed to get video room details")
 		}
-		utils.JSONError(w, http.StatusInternalServerError, "Failed to get video room details")
 		return
 	}
 
@@ -96,6 +100,7 @@ func (h *Handler) GetRoomInfo(w http.ResponseWriter, r *http.Request) {
 }
 
 // ServeWS upgrades the HTTP connection to a WebRTC signaling WebSocket.
+// Enforces origin check, access token validation, and room membership BEFORE upgrading connection.
 func (h *Handler) ServeWS(w http.ResponseWriter, r *http.Request) {
 	roomIDStr := chi.URLParam(r, "roomID")
 	roomID, err := uuid.Parse(roomIDStr)
@@ -104,9 +109,9 @@ func (h *Handler) ServeWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tokenStr := r.URL.Query().Get("token")
+	tokenStr := utils.ExtractWebSocketToken(r)
 	if tokenStr == "" {
-		http.Error(w, "Unauthorized: missing token query param", http.StatusUnauthorized)
+		http.Error(w, "Unauthorized: missing token", http.StatusUnauthorized)
 		return
 	}
 
@@ -116,7 +121,20 @@ func (h *Handler) ServeWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	conn, err := upgrader.Upgrade(w, r, nil)
+	// Protected WebSocket connections require access tokens
+	if claims.TokenType != middleware.TokenTypeAccess {
+		http.Error(w, "Unauthorized: access token required", http.StatusUnauthorized)
+		return
+	}
+
+	// Verify room membership before upgrading the connection
+	isMember, err := h.service.IsUserInRoom(r.Context(), roomID, claims.UserID)
+	if err != nil || !isMember {
+		http.Error(w, "Forbidden: you are not a member of this video room", http.StatusForbidden)
+		return
+	}
+
+	conn, err := h.upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		slog.Error("Failed to upgrade video signaling websocket", "error", err)
 		return

@@ -68,7 +68,7 @@ func (s *service) CreateInvite(ctx context.Context, inviterID uuid.UUID, inviter
 		defer cancel()
 
 		if err := s.emailService.SendInviteEmail(bgCtx, toEmail, token.String(), inviterName); err != nil {
-			slog.Warn("Failed to send invite email", "to", toEmail, "token", token.String(), "error", err)
+			slog.Warn("Failed to send invite email", "to", toEmail, "error", err)
 		}
 	}()
 

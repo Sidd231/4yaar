@@ -138,6 +138,16 @@ func (s *service) Login(ctx context.Context, email, password string) (*AuthRespo
 
 // Refresh validates and rotates the refresh token.
 func (s *service) Refresh(ctx context.Context, refreshTokenString string) (*AuthResponse, error) {
+	claims, err := middleware.ParseAndValidateToken(refreshTokenString, s.cfg.JWTSecret)
+	if err != nil {
+		return nil, ErrInvalidToken
+	}
+
+	// Only refresh tokens may be used to refresh
+	if claims.TokenType != middleware.TokenTypeRefresh {
+		return nil, ErrInvalidToken
+	}
+
 	// Check Redis blacklist
 	blacklisted, err := s.repo.IsTokenBlacklisted(ctx, refreshTokenString)
 	if err != nil {
@@ -145,11 +155,6 @@ func (s *service) Refresh(ctx context.Context, refreshTokenString string) (*Auth
 	}
 	if blacklisted {
 		return nil, ErrTokenRevoked
-	}
-
-	claims, err := middleware.ParseAndValidateToken(refreshTokenString, s.cfg.JWTSecret)
-	if err != nil {
-		return nil, ErrInvalidToken
 	}
 
 	user, err := s.repo.GetUserByID(ctx, claims.UserID)
@@ -162,7 +167,9 @@ func (s *service) Refresh(ctx context.Context, refreshTokenString string) (*Auth
 	if remainingTTL <= 0 {
 		remainingTTL = s.cfg.JWTRefreshExpiry
 	}
-	_ = s.repo.BlacklistToken(ctx, refreshTokenString, remainingTTL)
+	if err := s.repo.BlacklistToken(ctx, refreshTokenString, remainingTTL); err != nil {
+		return nil, fmt.Errorf("failed to revoke old refresh token during rotation: %w", err)
+	}
 
 	// Issue new access and refresh tokens
 	return s.generateAuthResponse(user)
@@ -171,15 +178,28 @@ func (s *service) Refresh(ctx context.Context, refreshTokenString string) (*Auth
 // Logout blacklists the provided refresh token in Redis.
 func (s *service) Logout(ctx context.Context, refreshTokenString string) error {
 	claims, err := middleware.ParseAndValidateToken(refreshTokenString, s.cfg.JWTSecret)
+	if err != nil {
+		return ErrInvalidToken
+	}
+
+	// Only refresh tokens can be revoked via logout
+	if claims.TokenType != middleware.TokenTypeRefresh {
+		return ErrInvalidToken
+	}
+
 	ttl := s.cfg.JWTRefreshExpiry
-	if err == nil && claims.ExpiresAt != nil {
+	if claims.ExpiresAt != nil {
 		remaining := time.Until(claims.ExpiresAt.Time)
 		if remaining > 0 {
 			ttl = remaining
 		}
 	}
 
-	return s.repo.BlacklistToken(ctx, refreshTokenString, ttl)
+	if err := s.repo.BlacklistToken(ctx, refreshTokenString, ttl); err != nil {
+		return fmt.Errorf("failed to blacklist token: %w", err)
+	}
+
+	return nil
 }
 
 // generateAuthResponse creates JWT access and refresh tokens for a user.
@@ -188,9 +208,10 @@ func (s *service) generateAuthResponse(user *models.User) (*AuthResponse, error)
 
 	// Access Token
 	accessClaims := &middleware.UserClaims{
-		UserID: user.ID,
-		Email:  user.Email,
-		Role:   user.Role,
+		UserID:    user.ID,
+		Email:     user.Email,
+		Role:      user.Role,
+		TokenType: middleware.TokenTypeAccess,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(now.Add(s.cfg.JWTAccessExpiry)),
 			IssuedAt:  jwt.NewNumericDate(now),
@@ -204,9 +225,10 @@ func (s *service) generateAuthResponse(user *models.User) (*AuthResponse, error)
 
 	// Refresh Token
 	refreshClaims := &middleware.UserClaims{
-		UserID: user.ID,
-		Email:  user.Email,
-		Role:   user.Role,
+		UserID:    user.ID,
+		Email:     user.Email,
+		Role:      user.Role,
+		TokenType: middleware.TokenTypeRefresh,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(now.Add(s.cfg.JWTRefreshExpiry)),
 			IssuedAt:  jwt.NewNumericDate(now),

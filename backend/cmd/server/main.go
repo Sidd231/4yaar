@@ -74,7 +74,10 @@ func main() {
 	defer redisClient.Close()
 
 	// 5. Ensure initial administrator exists in invite-only environment
-	ensureInitialAdmin(db)
+	if err := ensureInitialAdmin(db, cfg); err != nil {
+		slog.Error("Failed to bootstrap initial admin", "error", err)
+		os.Exit(1)
+	}
 
 	// 6. Initialize Email Service (Amazon SES)
 	emailService, err := email.NewEmailService(cfg)
@@ -111,9 +114,9 @@ func main() {
 	handlers := &router.Handlers{
 		Auth:      auth.NewHandler(authService),
 		Invite:    invite.NewHandler(inviteService),
-		Chat:      chat.NewHandler(chatService, chatHub, cfg.JWTSecret),
+		Chat:      chat.NewHandler(chatService, chatHub, cfg.JWTSecret, cfg.AllowedOrigins),
 		Files:     files.NewHandler(filesService),
-		VideoCall: videocall.NewHandler(videoService, videoHub, cfg.JWTSecret),
+		VideoCall: videocall.NewHandler(videoService, videoHub, cfg.JWTSecret, cfg.AllowedOrigins),
 	}
 
 	// 11. Build HTTP Mux Router
@@ -173,23 +176,65 @@ func runMigrations(db *gorm.DB) error {
 	)
 }
 
-// ensureInitialAdmin seeds an initial admin if no users exist so the invite system can be bootstrapped.
-func ensureInitialAdmin(db *gorm.DB) {
-	var count int64
-	db.Model(&models.User{}).Count(&count)
-	if count == 0 {
-		hash, _ := bcrypt.GenerateFromPassword([]byte("Admin@4Yaar2026!"), bcrypt.DefaultCost)
-		admin := models.User{
-			ID:           uuid.New(),
-			Name:         "System Admin",
-			Email:        "admin@4yaar.local",
-			PasswordHash: string(hash),
-			Role:         models.RoleAdmin,
-			CreatedAt:    time.Now(),
-			UpdatedAt:    time.Now(),
-		}
-		if err := db.Create(&admin).Error; err == nil {
-			slog.Info("Bootstrapped initial administrator account", "email", admin.Email, "role", admin.Role)
-		}
+// ValidateBootstrapCredentials validates bootstrap admin credentials.
+func ValidateBootstrapCredentials(email, password string) error {
+	if email == "" || password == "" {
+		return errors.New("admin bootstrap email and password must both be provided")
 	}
+	if len(password) < 8 {
+		return errors.New("ADMIN_BOOTSTRAP_PASSWORD must be at least 8 characters")
+	}
+	if password == config.LegacyAdminPassword {
+		return errors.New("ADMIN_BOOTSTRAP_PASSWORD cannot use legacy default credentials")
+	}
+	return nil
+}
+
+// ensureInitialAdmin seeds an initial admin if no users exist so the invite system can be bootstrapped.
+// Credentials MUST be provided via ADMIN_BOOTSTRAP_EMAIL and ADMIN_BOOTSTRAP_PASSWORD environment variables.
+// If the user table is empty and credentials are not provided, startup will log a warning; the system
+// remains usable only once an admin is created through another mechanism (e.g. a one-time CLI command).
+func ensureInitialAdmin(db *gorm.DB, cfg *config.Config) error {
+	var count int64
+	if err := db.Model(&models.User{}).Count(&count).Error; err != nil {
+		return fmt.Errorf("failed to count existing users: %w", err)
+	}
+	if count > 0 {
+		return nil
+	}
+
+	bootstrapEmail := cfg.AdminBootstrapEmail
+	bootstrapPassword := cfg.AdminBootstrapPassword
+
+	if bootstrapEmail == "" || bootstrapPassword == "" {
+		slog.Warn("No users exist and ADMIN_BOOTSTRAP_EMAIL / ADMIN_BOOTSTRAP_PASSWORD are not set. " +
+			"Set these environment variables and restart to create the initial administrator.")
+		return nil
+	}
+
+	if err := ValidateBootstrapCredentials(bootstrapEmail, bootstrapPassword); err != nil {
+		return err
+	}
+
+	hash, err := bcrypt.GenerateFromPassword([]byte(bootstrapPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return fmt.Errorf("failed to hash admin bootstrap password: %w", err)
+	}
+
+	admin := models.User{
+		ID:           uuid.New(),
+		Name:         "System Admin",
+		Email:        bootstrapEmail,
+		PasswordHash: string(hash),
+		Role:         models.RoleAdmin,
+		CreatedAt:    time.Now(),
+		UpdatedAt:    time.Now(),
+	}
+	if err := db.Create(&admin).Error; err != nil {
+		return fmt.Errorf("failed to create initial admin account: %w", err)
+	}
+
+	// Log only the email, never the password
+	slog.Info("Bootstrapped initial administrator account", "email", admin.Email, "role", admin.Role)
+	return nil
 }

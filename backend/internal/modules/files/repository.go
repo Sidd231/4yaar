@@ -15,6 +15,7 @@ type Repository interface {
 	CreateFile(ctx context.Context, file *models.File) error
 	GetFileByID(ctx context.Context, id uuid.UUID) (*models.File, error)
 	SoftDeleteFile(ctx context.Context, id uuid.UUID) error
+	IsUserInRoom(ctx context.Context, roomID, userID uuid.UUID) (bool, error)
 }
 
 type repository struct {
@@ -50,4 +51,14 @@ func (r *repository) SoftDeleteFile(ctx context.Context, id uuid.UUID) error {
 		Model(&models.File{}).
 		Where("id = ?", id).
 		Update("deleted_at", now).Error
+}
+
+// IsUserInRoom verifies if the given user is an active member of the room.
+func (r *repository) IsUserInRoom(ctx context.Context, roomID, userID uuid.UUID) (bool, error) {
+	var count int64
+	err := r.db.WithContext(ctx).
+		Model(&models.RoomMember{}).
+		Where("room_id = ? AND user_id = ?", roomID, userID).
+		Count(&count).Error
+	return count > 0, err
 }

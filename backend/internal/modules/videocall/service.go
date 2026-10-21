@@ -12,7 +12,8 @@ import (
 )
 
 var (
-	ErrVideoRoomNotFound = errors.New("video room not found")
+	ErrVideoRoomNotFound     = errors.New("video room not found")
+	ErrVideoRoomUnauthorized = errors.New("unauthorized: not a member of this video room")
 )
 
 // VideoRoomInfo encapsulates room metadata along with real-time active peer count.
@@ -27,7 +28,8 @@ type VideoRoomInfo struct {
 // Service defines video call room operations.
 type Service interface {
 	CreateRoom(ctx context.Context, name string, creatorID uuid.UUID) (*models.Room, error)
-	GetRoomInfo(ctx context.Context, roomID uuid.UUID) (*VideoRoomInfo, error)
+	GetRoomInfo(ctx context.Context, roomID, userID uuid.UUID) (*VideoRoomInfo, error)
+	IsUserInRoom(ctx context.Context, roomID, userID uuid.UUID) (bool, error)
 }
 
 type service struct {
@@ -73,14 +75,33 @@ func (s *service) CreateRoom(ctx context.Context, name string, creatorID uuid.UU
 	return room, nil
 }
 
+// IsUserInRoom verifies whether a user is an active member of the given room.
+func (s *service) IsUserInRoom(ctx context.Context, roomID, userID uuid.UUID) (bool, error) {
+	var count int64
+	err := s.db.WithContext(ctx).
+		Model(&models.RoomMember{}).
+		Where("room_id = ? AND user_id = ?", roomID, userID).
+		Count(&count).Error
+	return count > 0, err
+}
+
 // GetRoomInfo queries database metadata and augments it with real-time connected peer metrics from the hub.
-func (s *service) GetRoomInfo(ctx context.Context, roomID uuid.UUID) (*VideoRoomInfo, error) {
+// Access requires that the requesting user is a member of the room.
+func (s *service) GetRoomInfo(ctx context.Context, roomID, userID uuid.UUID) (*VideoRoomInfo, error) {
 	var room models.Room
 	if err := s.db.WithContext(ctx).First(&room, "id = ?", roomID).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrVideoRoomNotFound
 		}
 		return nil, err
+	}
+
+	isMember, err := s.IsUserInRoom(ctx, roomID, userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to verify room membership: %w", err)
+	}
+	if !isMember {
+		return nil, ErrVideoRoomUnauthorized
 	}
 
 	peerCount := s.hub.GetPeerCount(roomID)
