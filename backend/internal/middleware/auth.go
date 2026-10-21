@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -36,12 +37,19 @@ func AuthMiddleware(jwtSecret string) func(http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			authHeader := r.Header.Get("Authorization")
 			if authHeader == "" {
+				// Allow unauthenticated access for login and refresh endpoints
+				if strings.HasPrefix(r.URL.Path, "/auth/login") || strings.HasPrefix(r.URL.Path, "/auth/refresh") {
+					next.ServeHTTP(w, r)
+					return
+				}
+				slog.Warn("AuthMiddleware: Missing Authorization header", "path", r.URL.Path)
 				utils.JSONError(w, http.StatusUnauthorized, "Missing Authorization header")
 				return
 			}
 
 			parts := strings.SplitN(authHeader, " ", 2)
 			if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
+				slog.Warn("AuthMiddleware: Invalid header format", "header", authHeader)
 				utils.JSONError(w, http.StatusUnauthorized, "Invalid Authorization header format. Expected 'Bearer <token>'")
 				return
 			}
@@ -49,12 +57,14 @@ func AuthMiddleware(jwtSecret string) func(http.Handler) http.Handler {
 			tokenString := parts[1]
 			claims, err := ParseAndValidateToken(tokenString, jwtSecret)
 			if err != nil {
+				slog.Warn("AuthMiddleware: Token validation failed", "error", err, "path", r.URL.Path)
 				utils.JSONError(w, http.StatusUnauthorized, fmt.Sprintf("Invalid or expired token: %s", err.Error()))
 				return
 			}
 
 			// Protected API endpoints must only accept access tokens
 			if claims.TokenType != TokenTypeAccess {
+				slog.Warn("AuthMiddleware: Invalid token type", "type", claims.TokenType)
 				utils.JSONError(w, http.StatusUnauthorized, "Invalid token type: access token required")
 				return
 			}

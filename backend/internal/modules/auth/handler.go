@@ -9,6 +9,8 @@ import (
 	"github.com/Sidd231/4yaar/backend/internal/middleware"
 	"github.com/Sidd231/4yaar/backend/internal/utils"
 	"github.com/google/uuid"
+	"bytes"
+	"io"
 )
 
 // Handler exposes HTTP handlers for authentication.
@@ -76,6 +78,12 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 // Login authenticates a user and returns JWT token pair.
 func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	var req loginRequest
+	// Debug: read raw request body
+	bodyBytes, _ := io.ReadAll(r.Body)
+	slog.Info("Login request raw body", "body", string(bodyBytes))
+	// Reset body for decoder
+	r.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
+
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		utils.JSONError(w, http.StatusBadRequest, "Invalid request payload")
 		return
@@ -90,11 +98,14 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if errors.Is(err, ErrInvalidCredentials) {
 			utils.JSONError(w, http.StatusUnauthorized, "Invalid email or password")
-			return
+		} else {
+			utils.JSONError(w, http.StatusInternalServerError, "Authentication failed")
 		}
-		utils.JSONError(w, http.StatusInternalServerError, "Authentication failed")
 		return
 	}
+
+	// Log the auth response (excluding token values for security)
+	slog.Info("Login successful", "user_id", resp.User.ID, "access_token_len", len(resp.AccessToken), "refresh_token_len", len(resp.RefreshToken))
 
 	utils.JSONResponse(w, http.StatusOK, resp)
 }
