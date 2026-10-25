@@ -35,12 +35,13 @@ type Config struct {
 	AdminBootstrapEmail    string
 	AdminBootstrapPassword string
 
-	DBHost     string
-	DBPort     string
-	DBUser     string
-	DBPassword string
-	DBName     string
-	DBSSLMode  string
+	DatabaseURL string
+	DBHost      string
+	DBPort      string
+	DBUser      string
+	DBPassword  string
+	DBName      string
+	DBSSLMode   string
 
 	RedisURL string
 
@@ -135,7 +136,7 @@ func LoadConfig() (*Config, error) {
 	}
 
 	cfg := &Config{
-		AppPort:          getEnv("APP_PORT", "8080"),
+		AppPort:          getEnv("PORT", getEnv("APP_PORT", "8080")),
 		AppEnv:           appEnv,
 		AppBaseURL:       appBaseURL,
 		AllowedOrigins:   allowedOrigins,
@@ -146,12 +147,13 @@ func LoadConfig() (*Config, error) {
 		AdminBootstrapEmail:    adminEmail,
 		AdminBootstrapPassword: adminPassword,
 
-		DBHost:     getEnv("DB_HOST", "localhost"),
-		DBPort:     getEnv("DB_PORT", "5432"),
-		DBUser:     getEnv("DB_USER", "postgres"),
-		DBPassword: getEnv("DB_PASSWORD", "postgres"),
-		DBName:     getEnv("DB_NAME", "4yaar"),
-		DBSSLMode:  getEnv("DB_SSLMODE", "disable"),
+		DatabaseURL: os.Getenv("DATABASE_URL"),
+		DBHost:      getEnv("DB_HOST", "localhost"),
+		DBPort:      getEnv("DB_PORT", "5432"),
+		DBUser:      getEnv("DB_USER", "postgres"),
+		DBPassword:  getEnv("DB_PASSWORD", "postgres"),
+		DBName:      getEnv("DB_NAME", "4yaar"),
+		DBSSLMode:   getEnv("DB_SSLMODE", "disable"),
 
 		RedisURL: getEnv("REDIS_URL", "redis://localhost:6379"),
 

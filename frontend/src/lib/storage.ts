@@ -1,83 +1,58 @@
 
-const REFRESH_TOKEN_KEY = '4yaar_refresh_token';
-const ACCESS_TOKEN_KEY = '4yaar_access_token';
-
-function isValidToken(
-  token: unknown
-): token is string {
-  return (
-    typeof token === 'string' &&
-    token.trim().length > 0 &&
-    token !== 'undefined' &&
-    token !== 'null'
-  );
-}
+// ---------------------------------------------------------------------------
+// storage.ts
+//
+// The refresh token is now stored exclusively as an httpOnly cookie set by
+// the backend. This module NO LONGER stores the refresh token in localStorage.
+//
+// The access token is kept in memory by the API client (axios.ts) and is
+// never persisted to storage.
+//
+// This file is kept for backward compatibility with any code that calls
+// storage.clearAllTokens() on logout, but all token storage methods are now
+// no-ops or read from localStorage only for the migration period.
+// ---------------------------------------------------------------------------
 
 export const storage = {
-  getRefreshToken(): string | null {
-    try {
-      const token = localStorage.getItem(REFRESH_TOKEN_KEY);
-      return isValidToken(token) ? token : null;
-    } catch {
-      return null;
-    }
-  },
+  // ---- Refresh token -------------------------------------------------------
+  // Now managed exclusively by the httpOnly cookie from the backend.
+  // These methods are intentionally no-ops on the client side.
 
-  setRefreshToken(token: string | null | undefined): void {
-    try {
-      if (!isValidToken(token)) {
-        localStorage.removeItem(REFRESH_TOKEN_KEY);
-        return;
-      }
-
-      localStorage.setItem(REFRESH_TOKEN_KEY, token);
-    } catch (error) {
-      console.error('Failed to store refresh token', error);
-    }
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  setRefreshToken(_token: string | null | undefined): void {
+    // Intentionally empty — the backend sets the httpOnly cookie.
   },
 
   clearRefreshToken(): void {
-    try {
-      localStorage.removeItem(REFRESH_TOKEN_KEY);
-    } catch {
-      // Storage may be unavailable.
-    }
+    // Intentionally empty — the backend clears the cookie on logout/refresh-fail.
   },
 
-  // Compatibility helpers. Access tokens are kept in memory
-  // by the API client in this implementation.
-  getAccessToken(): string | null {
-    try {
-      const token = localStorage.getItem(ACCESS_TOKEN_KEY);
-      return isValidToken(token) ? token : null;
-    } catch {
-      return null;
-    }
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  getRefreshToken(): string | null {
+    // The refresh token is in an httpOnly cookie and is NOT readable from JS.
+    return null;
   },
 
-  setAccessToken(token: string | null | undefined): void {
-    try {
-      if (!isValidToken(token)) {
-        localStorage.removeItem(ACCESS_TOKEN_KEY);
-        return;
-      }
+  // ---- Access token --------------------------------------------------------
+  // Kept in memory only (see axios.ts). No localStorage persistence.
 
-      localStorage.setItem(ACCESS_TOKEN_KEY, token);
-    } catch (error) {
-      console.error('Failed to store access token', error);
-    }
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  setAccessToken(_token: string | null | undefined): void {
+    // Intentionally empty — managed in memory by axios.ts.
   },
 
   clearAccessToken(): void {
-    try {
-      localStorage.removeItem(ACCESS_TOKEN_KEY);
-    } catch {
-      // Storage may be unavailable.
-    }
+    // Intentionally empty — managed in memory by axios.ts.
   },
 
+  getAccessToken(): string | null {
+    return null;
+  },
+
+  // ---- Convenience ---------------------------------------------------------
   clearAllTokens(): void {
-    this.clearAccessToken();
-    this.clearRefreshToken();
+    // In-memory token is cleared by calling setAccessToken(null) in axios.ts.
+    // httpOnly cookie is cleared by the backend on logout.
+    // Nothing to clear in localStorage now.
   },
 };

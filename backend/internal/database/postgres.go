@@ -3,6 +3,7 @@ package database
 import (
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/Sidd231/4yaar/backend/internal/config"
@@ -13,15 +14,20 @@ import (
 
 // NewPostgresDB initializes and returns a GORM PostgreSQL connection pool.
 func NewPostgresDB(cfg *config.Config) (*gorm.DB, error) {
-	dsn := fmt.Sprintf(
-		"host=%s user=%s password=%s dbname=%s port=%s sslmode=%s TimeZone=UTC",
-		cfg.DBHost,
-		cfg.DBUser,
-		cfg.DBPassword,
-		cfg.DBName,
-		cfg.DBPort,
-		cfg.DBSSLMode,
-	)
+	var dsn string
+	if strings.TrimSpace(cfg.DatabaseURL) != "" {
+		dsn = strings.TrimSpace(cfg.DatabaseURL)
+	} else {
+		dsn = fmt.Sprintf(
+			"host=%s user=%s password=%s dbname=%s port=%s sslmode=%s TimeZone=UTC",
+			cfg.DBHost,
+			cfg.DBUser,
+			cfg.DBPassword,
+			cfg.DBName,
+			cfg.DBPort,
+			cfg.DBSSLMode,
+		)
+	}
 
 	// GORM logger level based on environment
 	gormLogLevel := logger.Warn

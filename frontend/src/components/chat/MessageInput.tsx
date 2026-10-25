@@ -50,7 +50,7 @@ export const MessageInput: React.FC<MessageInputProps> = ({
         const uploadRes = await filesApi.uploadFile(selectedFile, roomId, (pct) => {
           setUploadProgress(pct);
         });
-        uploadedFileId = uploadRes.id;
+        uploadedFileId = (uploadRes as any)?.file?.id || uploadRes.id;
         messageType = selectedFile.type.startsWith('image/') ? 'image' : 'file';
       } catch (err: any) {
         setUploadError(err.response?.data?.error || 'Failed to upload attachment');

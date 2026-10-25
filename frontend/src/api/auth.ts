@@ -1,7 +1,14 @@
 
 import { apiClient, setAccessToken } from './axios';
 import { AuthResponse, User } from '../types/auth';
-import { storage } from '../lib/storage';
+
+// ---------------------------------------------------------------------------
+// authApi
+//
+// All endpoints use apiClient (withCredentials: true).
+// After login/register the backend sets the httpOnly refresh_token cookie.
+// The access_token from the JSON body is stored in memory via setAccessToken.
+// ---------------------------------------------------------------------------
 
 function validateAuthResponse(res: AuthResponse): AuthResponse {
   if (
@@ -9,14 +16,10 @@ function validateAuthResponse(res: AuthResponse): AuthResponse {
     typeof res.access_token !== 'string' ||
     !res.access_token.trim() ||
     res.access_token === 'undefined' ||
-    res.access_token === 'null' ||
-    typeof res.refresh_token !== 'string' ||
-    !res.refresh_token.trim() ||
-    res.refresh_token === 'undefined' ||
-    res.refresh_token === 'null'
+    res.access_token === 'null'
   ) {
     throw new Error(
-      'Authentication response is missing valid tokens. Check the backend response.'
+      'Authentication response is missing a valid access_token. Check the backend response.'
     );
   }
 
@@ -24,29 +27,21 @@ function validateAuthResponse(res: AuthResponse): AuthResponse {
 }
 
 export const authApi = {
-  async login(
-    email: string,
-    password: string
-  ): Promise<AuthResponse> {
+  async login(email: string, password: string): Promise<AuthResponse> {
     try {
-      const response = await apiClient.post<AuthResponse>(
-        '/auth/login',
-        { email, password }
-      );
+      const response = await apiClient.post<AuthResponse>('/auth/login', {
+        email,
+        password,
+      });
 
-      const res = validateAuthResponse(response.data);
+      // Backend wraps success as { data: AuthResponse, error: null }
+      const body = (response.data as any)?.data ?? response.data;
+      const res = validateAuthResponse(body as AuthResponse);
 
       setAccessToken(res.access_token);
-      storage.setAccessToken(res.access_token);
-      storage.setRefreshToken(res.refresh_token);
-
       return res;
     } catch (error) {
-      // Do not leave a previous session active after a failed login.
       setAccessToken(null);
-      storage.clearAccessToken();
-      storage.clearRefreshToken();
-
       throw error;
     }
   },
@@ -57,50 +52,36 @@ export const authApi = {
     password: string
   ): Promise<AuthResponse> {
     try {
-      const response = await apiClient.post<AuthResponse>(
-        '/auth/register',
-        {
-          invite_token: inviteToken,
-          name,
-          password,
-        }
-      );
+      const response = await apiClient.post<AuthResponse>('/auth/register', {
+        invite_token: inviteToken,
+        name,
+        password,
+      });
 
-      const res = validateAuthResponse(response.data);
+      const body = (response.data as any)?.data ?? response.data;
+      const res = validateAuthResponse(body as AuthResponse);
 
       setAccessToken(res.access_token);
-      storage.setAccessToken(res.access_token);
-      storage.setRefreshToken(res.refresh_token);
-
       return res;
     } catch (error) {
       setAccessToken(null);
-      storage.clearAccessToken();
-      storage.clearRefreshToken();
-
       throw error;
     }
   },
 
   async getMe(): Promise<User> {
-    const response = await apiClient.get<User>('/auth/me');
-    return response.data;
+    const response = await apiClient.get<{ data?: User } & User>('/auth/me');
+    return (response.data as any)?.data ?? response.data;
   },
 
   async logout(): Promise<void> {
-    const refreshToken = storage.getRefreshToken();
-
     try {
-      if (refreshToken) {
-        await apiClient.post('/auth/logout', {
-          refresh_token: refreshToken,
-        });
-      }
+      // POST with no body — the backend reads the httpOnly cookie.
+      await apiClient.post('/auth/logout', {});
     } catch {
-      // Logout locally even if the backend is unreachable.
+      // Always clear local state even if the server is unreachable.
     } finally {
       setAccessToken(null);
-      storage.clearAllTokens();
     }
   },
 };

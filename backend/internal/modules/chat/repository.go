@@ -65,6 +65,7 @@ func (r *repository) GetUserRooms(ctx context.Context, userID uuid.UUID) ([]mode
 		Joins("JOIN room_members rm ON rm.room_id = rooms.id").
 		Where("rm.user_id = ?", userID).
 		Preload("Creator").
+		Preload("Members.User").
 		Find(&rooms).Error
 	return rooms, err
 }

@@ -7,12 +7,12 @@ export const videoApi = {
     if (existingRoomId) payload.room_id = existingRoomId;
     if (name) payload.name = name;
 
-    const res = await apiClient.post<{ room_id: string; name: string }>('/video/rooms', payload);
-    return res.data;
+    const res = await apiClient.post<any>('/video/rooms', payload);
+    return res.data?.data !== undefined ? res.data.data : res.data;
   },
 
   async getRoomInfo(roomId: string): Promise<VideoRoomInfo> {
-    const res = await apiClient.get<VideoRoomInfo>(`/video/rooms/${roomId}`);
-    return res.data;
+    const res = await apiClient.get<any>(`/video/rooms/${roomId}`);
+    return res.data?.data !== undefined ? res.data.data : res.data;
   },
 };

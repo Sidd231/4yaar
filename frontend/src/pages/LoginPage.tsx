@@ -37,11 +37,9 @@ export const LoginPage: React.FC = () => {
     <div className="min-h-screen bg-brand-black flex flex-col justify-center items-center px-4">
       <div className="w-full max-w-sm border border-brand-border bg-brand-surface rounded-lg p-6 shadow-2xl">
         {/* Brand Header */}
-        <div className="flex items-center gap-2 mb-6 justify-center">
-          <div className="w-6 h-6 rounded bg-brand-amber/20 border border-brand-amber/40 flex items-center justify-center">
-            <span className="w-2.5 h-2.5 rounded-full bg-brand-amber" />
-          </div>
-          <h1 className="font-display font-bold text-lg text-brand-textHeading tracking-tight flex items-center gap-1.5">
+        <div className="flex items-center gap-2.5 mb-6 justify-center">
+          <img src="/4yaar.png" alt="4Yaar Logo" className="w-8 h-8 rounded-md object-contain" />
+          <h1 className="font-display font-bold text-xl text-brand-textHeading tracking-tight flex items-center gap-1.5">
             4Yaar
             <span className="w-1.5 h-1.5 rounded-full bg-brand-amber" />
           </h1>

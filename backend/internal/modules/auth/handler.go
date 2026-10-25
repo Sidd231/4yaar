@@ -9,8 +9,6 @@ import (
 	"github.com/Sidd231/4yaar/backend/internal/middleware"
 	"github.com/Sidd231/4yaar/backend/internal/utils"
 	"github.com/google/uuid"
-	"bytes"
-	"io"
 )
 
 // Handler exposes HTTP handlers for authentication.
@@ -72,18 +70,14 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Set httpOnly refresh token cookie
+	setRefreshTokenCookie(w, resp.RefreshToken, 7*24*3600)
 	utils.JSONResponse(w, http.StatusCreated, resp)
 }
 
 // Login authenticates a user and returns JWT token pair.
 func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	var req loginRequest
-	// Debug: read raw request body
-	bodyBytes, _ := io.ReadAll(r.Body)
-	slog.Info("Login request raw body", "body", string(bodyBytes))
-	// Reset body for decoder
-	r.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
-
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		utils.JSONError(w, http.StatusBadRequest, "Invalid request payload")
 		return
@@ -107,25 +101,34 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	// Log the auth response (excluding token values for security)
 	slog.Info("Login successful", "user_id", resp.User.ID, "access_token_len", len(resp.AccessToken), "refresh_token_len", len(resp.RefreshToken))
 
+	// Set httpOnly refresh token cookie
+	setRefreshTokenCookie(w, resp.RefreshToken, 7*24*3600)
 	utils.JSONResponse(w, http.StatusOK, resp)
 }
 
 // Refresh rotates the refresh token and returns a new access token.
 func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
-	var req tokenRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		utils.JSONError(w, http.StatusBadRequest, "Invalid request payload")
-		return
+	refreshToken := ""
+	if cookie, err := r.Cookie("refresh_token"); err == nil && cookie.Value != "" {
+		refreshToken = cookie.Value
 	}
 
-	if req.RefreshToken == "" {
+	if refreshToken == "" && r.Body != nil {
+		var req tokenRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err == nil {
+			refreshToken = req.RefreshToken
+		}
+	}
+
+	if refreshToken == "" {
 		utils.JSONError(w, http.StatusBadRequest, "refresh_token is required")
 		return
 	}
 
-	resp, err := h.service.Refresh(r.Context(), req.RefreshToken)
+	resp, err := h.service.Refresh(r.Context(), refreshToken)
 	if err != nil {
 		if errors.Is(err, ErrTokenRevoked) || errors.Is(err, ErrInvalidToken) {
+			clearRefreshTokenCookie(w)
 			utils.JSONError(w, http.StatusUnauthorized, "Invalid or revoked refresh token")
 			return
 		}
@@ -133,32 +136,59 @@ func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Set rotated httpOnly refresh token cookie
+	setRefreshTokenCookie(w, resp.RefreshToken, 7*24*3600)
 	utils.JSONResponse(w, http.StatusOK, resp)
 }
 
 // Logout invalidates a refresh token in Redis.
 func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
-	var req tokenRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		utils.JSONError(w, http.StatusBadRequest, "Invalid request payload")
-		return
+	refreshToken := ""
+	if cookie, err := r.Cookie("refresh_token"); err == nil && cookie.Value != "" {
+		refreshToken = cookie.Value
 	}
 
-	if req.RefreshToken == "" {
-		utils.JSONError(w, http.StatusBadRequest, "refresh_token is required")
-		return
+	if refreshToken == "" && r.Body != nil {
+		var req tokenRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err == nil {
+			refreshToken = req.RefreshToken
+		}
 	}
 
-	if err := h.service.Logout(r.Context(), req.RefreshToken); err != nil {
-		if errors.Is(err, ErrInvalidToken) {
-			utils.JSONError(w, http.StatusUnauthorized, "Invalid or expired refresh token")
+	if refreshToken != "" {
+		if err := h.service.Logout(r.Context(), refreshToken); err != nil && !errors.Is(err, ErrInvalidToken) {
+			clearRefreshTokenCookie(w)
+			utils.JSONError(w, http.StatusInternalServerError, "Failed to logout")
 			return
 		}
-		utils.JSONError(w, http.StatusInternalServerError, "Failed to logout")
-		return
 	}
 
+	clearRefreshTokenCookie(w)
 	utils.JSONResponse(w, http.StatusOK, map[string]string{"message": "Logged out successfully"})
+}
+
+func setRefreshTokenCookie(w http.ResponseWriter, token string, maxAge int) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     "refresh_token",
+		Value:    token,
+		Path:     "/",
+		MaxAge:   maxAge,
+		HttpOnly: true,
+		Secure:   false, // Set to false to support local dev http, or true in production
+		SameSite: http.SameSiteLaxMode,
+	})
+}
+
+func clearRefreshTokenCookie(w http.ResponseWriter, ) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     "refresh_token",
+		Value:    "",
+		Path:     "/",
+		MaxAge:   -1,
+		HttpOnly: true,
+		Secure:   false,
+		SameSite: http.SameSiteLaxMode,
+	})
 }
 
 // GetMe returns the authenticated user's profile.

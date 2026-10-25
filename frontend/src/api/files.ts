@@ -7,7 +7,7 @@ export const filesApi = {
     formData.append('file', file);
     formData.append('room_id', roomId);
 
-    const res = await apiClient.post<UploadFileResponse>('/files/upload', formData, {
+    const res = await apiClient.post<any>('/files/upload', formData, {
       headers: {
         // Axios will automatically set multipart/form-data with boundary when data is FormData
         'Content-Type': undefined,
@@ -19,12 +19,12 @@ export const filesApi = {
         }
       },
     });
-    return res.data;
+    return res.data?.data !== undefined ? res.data.data : res.data;
   },
 
   async getDownloadUrl(fileId: string): Promise<PresignedURLResponse> {
-    const res = await apiClient.get<PresignedURLResponse>(`/files/${fileId}`);
-    return res.data;
+    const res = await apiClient.get<any>(`/files/${fileId}`);
+    return res.data?.data !== undefined ? res.data.data : res.data;
   },
 
   async deleteFile(fileId: string): Promise<void> {

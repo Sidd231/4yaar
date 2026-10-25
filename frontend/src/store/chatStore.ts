@@ -12,6 +12,8 @@ interface ChatState {
   wsConnected: boolean;
   error: string | null;
 
+  unreadCounts: Record<string, number>;
+  markRoomAsRead: (roomId: string) => void;
   setWsConnected: (connected: boolean) => void;
   setActiveRoomId: (roomId: string | null) => void;
   fetchRooms: () => Promise<void>;
@@ -25,6 +27,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   rooms: [],
   activeRoomId: null,
   messages: {},
+  unreadCounts: {},
   isLoadingRooms: false,
   isLoadingMessages: false,
   hasMoreMessages: {},
@@ -34,7 +37,21 @@ export const useChatStore = create<ChatState>((set, get) => ({
   setWsConnected: (connected: boolean) => set({ wsConnected: connected }),
 
   setActiveRoomId: (roomId: string | null) => {
-    set({ activeRoomId: roomId });
+    set((s) => ({
+      activeRoomId: roomId,
+      unreadCounts: roomId
+        ? { ...s.unreadCounts, [roomId]: 0 }
+        : s.unreadCounts,
+    }));
+  },
+
+  markRoomAsRead: (roomId: string) => {
+    set((s) => ({
+      unreadCounts: {
+        ...s.unreadCounts,
+        [roomId]: 0,
+      },
+    }));
   },
 
   clearError: () => set({ error: null }),
@@ -43,9 +60,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set({ isLoadingRooms: true, error: null });
     try {
       const rooms = await chatApi.listRooms();
-      set({ rooms, isLoadingRooms: false });
+      set({ rooms: Array.isArray(rooms) ? rooms : [], isLoadingRooms: false });
     } catch (err: any) {
       set({
+        rooms: [],
         isLoadingRooms: false,
         error: err.response?.data?.error || 'Failed to load rooms',
       });
@@ -129,11 +147,22 @@ export const useChatStore = create<ChatState>((set, get) => ({
       if (roomMsgs.some((m) => m.id === msg.id)) {
         return s;
       }
+
+      // If message is in a room other than the active one, increment unread count
+      const isCurrentRoom = s.activeRoomId === msg.room_id;
+      const currentCount = s.unreadCounts[msg.room_id] || 0;
+
       return {
         messages: {
           ...s.messages,
           [msg.room_id]: [...roomMsgs, msg],
         },
+        unreadCounts: isCurrentRoom
+          ? s.unreadCounts
+          : {
+              ...s.unreadCounts,
+              [msg.room_id]: currentCount + 1,
+            },
       };
     });
   },

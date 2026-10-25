@@ -208,24 +208,31 @@ export function useVideoCall() {
       try {
         setStatus('connecting');
 
-        // Request audio and video
-        try {
-          const stream = await navigator.mediaDevices.getUserMedia({
-            audio: true,
-            video: { width: { ideal: 640 }, height: { ideal: 480 } },
-          });
-          localStreamRef.current = stream;
-        } catch (mediaErr: any) {
-          console.warn('Could not get video/audio stream:', mediaErr);
-          // Try audio only as fallback
+        // Request audio and video with progressive fallback
+        // NotReadableError happens when another tab/app holds the camera.
+        // We try: ideal constraints → plain video:true → audio-only → empty stream.
+        const tryGetMedia = async (): Promise<MediaStream> => {
           try {
-            const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            localStreamRef.current = audioStream;
-          } catch {
-            // Proceed even with no mic/cam for viewing
-            localStreamRef.current = new MediaStream();
+            return await navigator.mediaDevices.getUserMedia({
+              audio: true,
+              video: { width: { ideal: 640 }, height: { ideal: 480 } },
+            });
+          } catch (e1: any) {
+            console.warn('getUserMedia ideal failed, retrying with plain video:', e1);
+            try {
+              return await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
+            } catch (e2: any) {
+              console.warn('getUserMedia with plain video failed, retrying audio-only:', e2);
+              try {
+                return await navigator.mediaDevices.getUserMedia({ audio: true });
+              } catch (e3: any) {
+                console.warn('getUserMedia audio-only failed, proceeding without media:', e3);
+                return new MediaStream();
+              }
+            }
           }
-        }
+        };
+        localStreamRef.current = await tryGetMedia();
 
         if (isCancelled) return;
 

@@ -8,8 +8,9 @@ import { Sidebar } from '../components/layout/Sidebar';
 import { MessageList } from '../components/chat/MessageList';
 import { MessageInput } from '../components/chat/MessageInput';
 import { CreateRoomDialog } from '../components/chat/CreateRoomDialog';
+import { AddMemberDialog } from '../components/chat/AddMemberDialog';
 import { CallOverlay } from '../components/videocall/CallOverlay';
-import { Phone, Hash, User as UserIcon } from 'lucide-react';
+import { Phone, Hash, User as UserIcon, UserPlus } from 'lucide-react';
 
 export const ChatPage: React.FC = () => {
   const { roomId } = useParams<{ roomId?: string }>();
@@ -26,9 +27,10 @@ export const ChatPage: React.FC = () => {
     wsConnected,
   } = useChatStore();
 
-  const { startCall } = useCallStore();
+  const { startCall, activeCallRoomId, isMinimized, setMinimized } = useCallStore();
 
   const [isCreateRoomOpen, setIsCreateRoomOpen] = useState(false);
+  const [isAddMemberOpen, setIsAddMemberOpen] = useState(false);
 
   // Load rooms on initial mount
   useEffect(() => {
@@ -59,8 +61,16 @@ export const ChatPage: React.FC = () => {
   const roomMessages = roomId ? messages[roomId] || [] : [];
   const hasMore = roomId ? !!hasMoreMessages[roomId] : false;
 
-  const handleStartVideoCall = async () => {
+  // True if a call is already live in this specific room
+  const isCallActive = !!activeCallRoomId && activeCallRoomId === roomId;
+
+  const handleCallButton = async () => {
     if (!roomId || !currentRoom) return;
+    if (isCallActive) {
+      // Just restore / maximize the overlay — don't re-init
+      if (isMinimized) setMinimized(false);
+      return;
+    }
     try {
       // Ensure backend video room exists or is created
       const videoRoom = await videoApi.getOrCreateRoom(currentRoom.name, roomId);
@@ -104,11 +114,34 @@ export const ChatPage: React.FC = () => {
 
               <div className="flex items-center gap-2">
                 <button
-                  onClick={handleStartVideoCall}
+                  onClick={() => setIsAddMemberOpen(true)}
                   className="px-3 py-1.5 rounded bg-brand-card hover:bg-zinc-800 text-brand-textHeading border border-brand-border text-xs font-mono font-medium flex items-center gap-1.5 transition-colors"
+                  title="Add members to room"
                 >
-                  <Phone className="w-3.5 h-3.5 text-brand-amber" />
-                  <span>Start Call</span>
+                  <UserPlus className="w-3.5 h-3.5 text-brand-amber" />
+                  <span>Add Member</span>
+                </button>
+
+                <button
+                  onClick={handleCallButton}
+                  className={`px-3 py-1.5 rounded border text-xs font-mono font-medium flex items-center gap-1.5 transition-colors ${
+                    isCallActive
+                      ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20'
+                      : 'bg-brand-card hover:bg-zinc-800 text-brand-textHeading border-brand-border'
+                  }`}
+                  title={isCallActive ? 'Join ongoing call' : 'Start a video call'}
+                >
+                  {isCallActive ? (
+                    <>
+                      <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                      <span>Join Call</span>
+                    </>
+                  ) : (
+                    <>
+                      <Phone className="w-3.5 h-3.5 text-brand-amber" />
+                      <span>Start Call</span>
+                    </>
+                  )}
                 </button>
               </div>
             </header>
@@ -157,6 +190,14 @@ export const ChatPage: React.FC = () => {
         isOpen={isCreateRoomOpen}
         onClose={() => setIsCreateRoomOpen(false)}
       />
+
+      {currentRoom && (
+        <AddMemberDialog
+          isOpen={isAddMemberOpen}
+          onClose={() => setIsAddMemberOpen(false)}
+          room={currentRoom}
+        />
+      )}
     </div>
   );
 };

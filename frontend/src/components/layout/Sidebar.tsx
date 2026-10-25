@@ -12,7 +12,7 @@ interface SidebarProps {
 
 export const Sidebar: React.FC<SidebarProps> = ({ onOpenCreateRoom }) => {
   const { user } = useAuthStore();
-  const { rooms, isLoadingRooms } = useChatStore();
+  const { rooms, isLoadingRooms, unreadCounts } = useChatStore();
 
   const groupRooms = rooms.filter((r) => r.type !== 'direct');
   const directRooms = rooms.filter((r) => r.type === 'direct');
@@ -23,9 +23,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenCreateRoom }) => {
         {/* Brand Bar */}
         <div className="h-14 px-4 flex items-center justify-between border-b border-brand-border shrink-0">
           <div className="flex items-center gap-2.5">
-            <div className="w-5 h-5 rounded bg-brand-amber/15 border border-brand-amber/30 flex items-center justify-center">
-              <span className="w-2 h-2 rounded-full bg-brand-amber" />
-            </div>
+            <img src="/4yaar.png" alt="4Yaar Logo" className="w-6 h-6 rounded object-contain" />
             <span className="font-display font-bold tracking-tight text-brand-textHeading text-[15px] flex items-center gap-1.5">
               4Yaar
               <span className="inline-block w-1.5 h-1.5 rounded-full bg-brand-amber" />
@@ -61,25 +59,34 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenCreateRoom }) => {
               <p className="px-2 py-1 text-xs text-zinc-600 font-mono italic">No direct chats</p>
             ) : (
               <nav className="space-y-0.5">
-                {directRooms.map((room) => (
-                  <NavLink
-                    key={room.id}
-                    to={`/chat/${room.id}`}
-                    className={({ isActive }) =>
-                      cn(
-                        'group flex items-center justify-between px-2.5 py-1.5 rounded transition-colors text-xs font-normal',
-                        isActive
-                          ? 'bg-brand-card text-brand-textHeading font-medium border border-brand-border/60'
-                          : 'text-brand-textBody hover:text-brand-textHeading hover:bg-brand-card'
-                      )
-                    }
-                  >
-                    <div className="flex items-center gap-2 truncate">
-                      <UserIcon className="w-3.5 h-3.5 text-brand-textMuted group-hover:text-brand-amber transition-colors shrink-0" />
-                      <span className="truncate">{room.name}</span>
-                    </div>
-                  </NavLink>
-                ))}
+                {directRooms.map((room) => {
+                  const unread = unreadCounts[room.id] || 0;
+                  return (
+                    <NavLink
+                      key={room.id}
+                      to={`/chat/${room.id}`}
+                      className={({ isActive }) =>
+                        cn(
+                          'group flex items-center justify-between px-2.5 py-1.5 rounded transition-colors text-xs font-normal',
+                          isActive
+                            ? 'bg-brand-card text-brand-textHeading font-medium border border-brand-border/60'
+                            : 'text-brand-textBody hover:text-brand-textHeading hover:bg-brand-card'
+                        )
+                      }
+                    >
+                      <div className="flex items-center gap-2 truncate">
+                        <UserIcon className="w-3.5 h-3.5 text-brand-textMuted group-hover:text-brand-amber transition-colors shrink-0" />
+                        <span className="truncate">{room.name}</span>
+                      </div>
+                      {/* Unread badge or active indicator */}
+                      {unread > 0 ? (
+                        <span className="px-1.5 py-0.5 text-[10px] font-mono font-bold leading-none bg-brand-amber text-brand-black rounded-full shrink-0 animate-pulse shadow-sm">
+                          {unread > 99 ? '99+' : unread}
+                        </span>
+                      ) : null}
+                    </NavLink>
+                  );
+                })}
               </nav>
             )}
           </div>
@@ -115,27 +122,36 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenCreateRoom }) => {
               </div>
             ) : (
               <nav className="space-y-0.5">
-                {groupRooms.map((room) => (
-                  <NavLink
-                    key={room.id}
-                    to={`/chat/${room.id}`}
-                    className={({ isActive }) =>
-                      cn(
-                        'group flex items-center justify-between px-2.5 py-1.5 rounded transition-colors text-xs font-normal',
-                        isActive
-                          ? 'bg-brand-card text-brand-textHeading font-medium border border-brand-border/60'
-                          : 'text-brand-textBody hover:text-brand-textHeading hover:bg-brand-card'
-                      )
-                    }
-                  >
-                    <div className="flex items-center gap-2 truncate">
-                      <Hash className="w-3.5 h-3.5 text-brand-textMuted group-hover:text-brand-amber transition-colors shrink-0" />
-                      <span className="truncate">{room.name}</span>
-                    </div>
-                    {/* Active amber dot */}
-                    <span className="w-1.5 h-1.5 rounded-full bg-brand-amber shrink-0 opacity-0 group-[.active]:opacity-100" />
-                  </NavLink>
-                ))}
+                {groupRooms.map((room) => {
+                  const unread = unreadCounts[room.id] || 0;
+                  return (
+                    <NavLink
+                      key={room.id}
+                      to={`/chat/${room.id}`}
+                      className={({ isActive }) =>
+                        cn(
+                          'group flex items-center justify-between px-2.5 py-1.5 rounded transition-colors text-xs font-normal',
+                          isActive
+                            ? 'bg-brand-card text-brand-textHeading font-medium border border-brand-border/60'
+                            : 'text-brand-textBody hover:text-brand-textHeading hover:bg-brand-card'
+                        )
+                      }
+                    >
+                      <div className="flex items-center gap-2 truncate">
+                        <Hash className="w-3.5 h-3.5 text-brand-textMuted group-hover:text-brand-amber transition-colors shrink-0" />
+                        <span className="truncate">{room.name}</span>
+                      </div>
+                      {/* Unread badge or active dot */}
+                      {unread > 0 ? (
+                        <span className="px-1.5 py-0.5 text-[10px] font-mono font-bold leading-none bg-brand-amber text-brand-black rounded-full shrink-0 animate-pulse shadow-sm">
+                          {unread > 99 ? '99+' : unread}
+                        </span>
+                      ) : (
+                        <span className="w-1.5 h-1.5 rounded-full bg-brand-amber shrink-0 opacity-0 group-[.active]:opacity-100" />
+                      )}
+                    </NavLink>
+                  );
+                })}
               </nav>
             )}
           </div>

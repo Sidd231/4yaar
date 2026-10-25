@@ -3,11 +3,19 @@ import { create } from 'zustand';
 
 import { User } from '../types/auth';
 import { authApi } from '../api/auth';
-import {
-  refreshAccessToken,
-  setAccessToken,
-} from '../api/axios';
-import { storage } from '../lib/storage';
+import { refreshAccessToken, setAccessToken } from '../api/axios';
+
+// ---------------------------------------------------------------------------
+// Auth state — Zustand store
+//
+// Token storage strategy:
+//  - access token  → in-memory variable inside axios.ts (no localStorage)
+//  - refresh token → httpOnly cookie set by the backend (not readable from JS)
+//
+// On app boot (initAuth) we attempt a silent token refresh. If the browser
+// holds a valid httpOnly refresh_token cookie the backend issues a new access
+// token; otherwise the user must log in again.
+// ---------------------------------------------------------------------------
 
 interface AuthState {
   user: User | null;
@@ -18,11 +26,7 @@ interface AuthState {
 
   initAuth: () => Promise<void>;
   login: (email: string, pass: string) => Promise<void>;
-  registerWithInvite: (
-    token: string,
-    name: string,
-    pass: string
-  ) => Promise<void>;
+  registerWithInvite: (token: string, name: string, pass: string) => Promise<void>;
   logout: () => Promise<void>;
   clearError: () => void;
 }
@@ -36,25 +40,17 @@ export const useAuthStore = create<AuthState>((set) => ({
 
   clearError: () => set({ error: null }),
 
+  // -------------------------------------------------------------------------
+  // initAuth — called once on app mount (App.tsx useEffect).
+  // Silently tries to get a new access token via the refresh_token cookie.
+  // -------------------------------------------------------------------------
   initAuth: async () => {
     set({ isInitializing: true });
 
     try {
-      const refreshToken = storage.getRefreshToken();
-
-      if (!refreshToken) {
-        setAccessToken(null);
-        storage.clearAccessToken();
-
-        set({
-          user: null,
-          accessToken: null,
-          isAuthenticated: false,
-        });
-
-        return;
-      }
-
+      // Attempt silent refresh. The httpOnly cookie is sent automatically.
+      // If no cookie exists (or it's expired) the backend returns 401 and
+      // refreshAccessToken() returns null.
       const newAccessToken = await refreshAccessToken();
 
       if (!newAccessToken) {
@@ -63,7 +59,6 @@ export const useAuthStore = create<AuthState>((set) => ({
           accessToken: null,
           isAuthenticated: false,
         });
-
         return;
       }
 
@@ -79,7 +74,6 @@ export const useAuthStore = create<AuthState>((set) => ({
       });
     } catch {
       setAccessToken(null);
-      storage.clearAccessToken();
 
       set({
         user: null,

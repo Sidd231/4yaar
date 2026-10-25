@@ -2,7 +2,10 @@ package files
 
 import (
 	"errors"
+	"io"
 	"net/http"
+	"path/filepath"
+	"strings"
 
 	"github.com/Sidd231/4yaar/backend/internal/middleware"
 	"github.com/Sidd231/4yaar/backend/internal/utils"
@@ -56,8 +59,46 @@ func (h *Handler) Upload(w http.ResponseWriter, r *http.Request) {
 
 	// Detect or parse mime type
 	mimeType := header.Header.Get("Content-Type")
-	if mimeType == "" {
-		mimeType = "application/octet-stream"
+	if semi := strings.Index(mimeType, ";"); semi != -1 {
+		mimeType = strings.TrimSpace(mimeType[:semi])
+	}
+	if mimeType == "" || mimeType == "application/octet-stream" {
+		// Read first 512 bytes to sniff content type
+		buf := make([]byte, 512)
+		n, _ := file.Read(buf)
+		if n > 0 {
+			sniffed := http.DetectContentType(buf[:n])
+			if semi := strings.Index(sniffed, ";"); semi != -1 {
+				sniffed = strings.TrimSpace(sniffed[:semi])
+			}
+			if sniffed != "application/octet-stream" {
+				mimeType = sniffed
+			}
+		}
+		// Reset file seek pointer
+		if seeker, ok := file.(io.Seeker); ok {
+			_, _ = seeker.Seek(0, io.SeekStart)
+		}
+	}
+	if mimeType == "" || mimeType == "application/octet-stream" {
+		switch strings.ToLower(filepath.Ext(header.Filename)) {
+		case ".jpg", ".jpeg":
+			mimeType = "image/jpeg"
+		case ".png":
+			mimeType = "image/png"
+		case ".gif":
+			mimeType = "image/gif"
+		case ".webp":
+			mimeType = "image/webp"
+		case ".svg":
+			mimeType = "image/svg+xml"
+		case ".pdf":
+			mimeType = "application/pdf"
+		case ".txt", ".md":
+			mimeType = "text/plain"
+		case ".mp4":
+			mimeType = "video/mp4"
+		}
 	}
 
 	resp, err := h.service.UploadFile(

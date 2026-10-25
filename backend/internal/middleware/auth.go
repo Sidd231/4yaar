@@ -43,14 +43,14 @@ func AuthMiddleware(jwtSecret string) func(http.Handler) http.Handler {
 					return
 				}
 				slog.Warn("AuthMiddleware: Missing Authorization header", "path", r.URL.Path)
-				utils.JSONError(w, http.StatusUnauthorized, "Missing Authorization header")
+				utils.JSONError(w, http.StatusUnauthorized, "unauthorized")
 				return
 			}
 
 			parts := strings.SplitN(authHeader, " ", 2)
 			if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
 				slog.Warn("AuthMiddleware: Invalid header format", "header", authHeader)
-				utils.JSONError(w, http.StatusUnauthorized, "Invalid Authorization header format. Expected 'Bearer <token>'")
+				utils.JSONError(w, http.StatusUnauthorized, "unauthorized")
 				return
 			}
 
@@ -58,14 +58,18 @@ func AuthMiddleware(jwtSecret string) func(http.Handler) http.Handler {
 			claims, err := ParseAndValidateToken(tokenString, jwtSecret)
 			if err != nil {
 				slog.Warn("AuthMiddleware: Token validation failed", "error", err, "path", r.URL.Path)
-				utils.JSONError(w, http.StatusUnauthorized, fmt.Sprintf("Invalid or expired token: %s", err.Error()))
+				if errors.Is(err, jwt.ErrTokenExpired) {
+					utils.JSONError(w, http.StatusUnauthorized, "token_expired")
+					return
+				}
+				utils.JSONError(w, http.StatusUnauthorized, "unauthorized")
 				return
 			}
 
 			// Protected API endpoints must only accept access tokens
 			if claims.TokenType != TokenTypeAccess {
 				slog.Warn("AuthMiddleware: Invalid token type", "type", claims.TokenType)
-				utils.JSONError(w, http.StatusUnauthorized, "Invalid token type: access token required")
+				utils.JSONError(w, http.StatusUnauthorized, "unauthorized")
 				return
 			}
 
